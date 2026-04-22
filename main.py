@@ -18,6 +18,8 @@ def main():
     output_video_frames = tracker.draw_annotations(video_frames, tracks)
 
     save_video(output_video_frames, 'output_videos/output_video.avi')
+    
+    # test
 
 
 if __name__ == '__main__':
