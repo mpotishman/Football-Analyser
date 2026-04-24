@@ -183,8 +183,9 @@ class Tracker:
 
             # draw players, right now player_dict = {track_id: bbox} - track id is passed as wikk be used to show each different player ID
             for track_id, player in player_dict.items():
+                colour = player.get("team_colour", (0,0,255))
                 frame = self.draw_ellipse(
-                    frame, player["bbox"], (0, 0, 255), track_id)
+                    frame, player["bbox"], (colour), track_id)
 
             # draw referees,
             for track_id, ref in referee_dict.items():
