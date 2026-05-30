@@ -12,6 +12,7 @@ import supervision as sv
 import pickle
 import os
 import sys
+import pandas as pd
 import cv2
 import numpy as np
 sys.path.append('../')
@@ -22,6 +23,19 @@ class Tracker:
         self.model = YOLO(model_path)
         # ByteTrack is a tracking algorithm — it links detections across frames so each player gets a persistent ID
         self.tracker = sv.ByteTrack()
+        
+        def interpolate_ball_positions(self, ball_positions):
+            # get the bbox values of the ball x within ball positions dictionary
+            ball_positions = [x.get(1, {}).get('bbox', []) for x in ball_positions]
+            ball_positions = pd.DataFrame(ball_positions, columns=['x1','y1','x2','y2'])
+            
+            # interpolate missing values
+            df_ball_positions = df_ball_positions.interpolate()
+            df_ball_positions = df_ball_positions.bfill()
+            
+            ball_positions = [{1: {"bbox":x}} for x in df_ball_positions.to_numpy().tolist()]
+            
+            return ball_positions
 
     # Passes every frame through the model, which returns bounding boxes + class labels (e.g player, ball) for every object it spots in each frame
     def detect_frames(self, frames):
