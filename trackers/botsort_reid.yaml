@@ -1,0 +1,18 @@
+# Ultralytics BoT-SORT tracker config with ReID enabled.
+# Used by Tracker.get_object_tracks via YOLO.track(...).
+
+tracker_type: botsort
+
+track_high_thresh: 0.25
+track_low_thresh: 0.10
+new_track_thresh: 0.25
+track_buffer: 90
+match_thresh: 0.80
+fuse_score: True
+
+gmc_method: sparseOptFlow
+
+proximity_thresh: 0.30
+appearance_thresh: 0.70
+with_reid: True
+model: auto

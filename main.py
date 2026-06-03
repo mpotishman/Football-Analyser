@@ -40,7 +40,7 @@ def main():
     tracker = Tracker(MODEL_PATH)
     tracks = tracker.get_object_tracks(
         video_frames,
-        read_from_stub=False,
+        read_from_stub=True,
         stub_path=STUB_PATH,
     )
 

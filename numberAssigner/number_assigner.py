@@ -51,19 +51,19 @@ class NumberAssigner:
 
                     player_crop = frame[y1:y2, x1:x2]
                     
-                    if self.good_cropping(player_crop, height, width):
-                        # then save it and use it later to get the actual number, pass in the player id as well
-                        crop_folder = f"crops/segment_{segment_id}/track_{player_id}"
-                        os.makedirs(crop_folder, exist_ok=True)
+                    # if self.good_cropping(player_crop, height, width):
+                    #     # then save it and use it later to get the actual number, pass in the player id as well
+                    #     crop_folder = f"crops/segment_{segment_id}/track_{player_id}"
+                    #     os.makedirs(crop_folder, exist_ok=True)
 
-                        cv2.imwrite(
-                            f"{crop_folder}/frame_{frame_number}.jpg",
-                            player_crop
-                        )
+                    #     cv2.imwrite(
+                    #         f"{crop_folder}/frame_{frame_number}.jpg",
+                    #         player_crop
+                    #     )
                         
-                        num_crops[player_id] += 1
+                    #     num_crops[player_id] += 1
                         
-                        # run number model here
+                    #     # run number model here
         
         return predicted_numbers
 

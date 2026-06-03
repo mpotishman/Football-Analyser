@@ -1,5 +1,5 @@
-# trackers.py — takes raw frames from main.py, runs them through YOLO to detect objects, then uses ByteTrack
-# to assign a consistent ID to each object across frames so the same player keeps the same ID throughout the video
+# trackers.py — takes raw frames from main.py, runs them through YOLO, then uses
+# Ultralytics BoT-SORT/ReID to assign object IDs across frames.
 
 # this section first initialises itself as a class, then detects every i frames, in this case 20 frame gap and stores it in detections variable
 # the second function takes in a group of frames and returns a dictionary in the format of:
@@ -8,7 +8,6 @@
 
 from utils import get_center_of_bbox, get_bbox_width
 from ultralytics import YOLO
-import supervision as sv
 import pickle
 import os
 import sys
@@ -19,10 +18,9 @@ sys.path.append('../')
 
 
 class Tracker:
-    def __init__(self, model_path):
+    def __init__(self, model_path, tracker_config="trackers/botsort_reid.yaml"):
         self.model = YOLO(model_path)
-        # ByteTrack is a tracking algorithm — it links detections across frames so each player gets a persistent ID
-        self.tracker = sv.ByteTrack()
+        self.tracker_config = tracker_config
         
         def interpolate_ball_positions(self, ball_positions):
             # get the bbox values of the ball x within ball positions dictionary
@@ -48,8 +46,14 @@ class Tracker:
             detections += detections_batch
         return detections
 
-    # Converts raw detections into structured tracks — each object gets a class and a persistent ID across frames
-    def get_object_tracks(self, frames, read_from_stub=False, stub_path=None):
+    # Converts raw detections into structured tracks.
+    def get_object_tracks(
+        self,
+        frames,
+        read_from_stub=False,
+        stub_path=None,
+        tracker_config=None
+    ):
 
         # if the code after this has already ran it should be saved in thr stub path location, so if it has been ran then just return whats already been saved rather than running it again
         if read_from_stub and stub_path is not None and os.path.exists(stub_path):
@@ -57,8 +61,7 @@ class Tracker:
                 tracks = pickle.load(f)
             return tracks
 
-        # get the needed frames, so initially pass an entire video, then this only gets the every i'th frame
-        detections = self.detect_frames(frames)
+        tracker_config = tracker_config or self.tracker_config
 
         tracks = {
             # eg [{0:{bbox: [0,0,0,0]}}] etc for one frame so it does it for all the frames in the video
@@ -67,56 +70,55 @@ class Tracker:
             "ball": []
         }
 
-        for frame_num, detection in enumerate(detections):
-            # {0: 'player', 1: 'goalkeeper'} — model's index to label mapping
-            cls_names = detection.names
-            # flipped to {'player': 0, 'goalkeeper': 1} for easy lookup by name
-            cls_names_inv = {v: k for k, v in cls_names.items()}
-
-            # YOLO returns its own format — this converts it to supervision's format so ByteTrack can process it
-            detection_supervision = sv.Detections.from_ultralytics(detection)
-
-            # convert goalkeeper object to player_object
-            for object_ind, class_id in enumerate(detection_supervision.class_id):
-                if cls_names[class_id] == "goalkeeper":
-                    detection_supervision.class_id[object_ind] = cls_names_inv["player"]
-
-            # Tracks objects - adds a tracker object to the detection, now each bounding box has its own id and remains the same throughout the video
-            detection_with_tracks = self.tracker.update_with_detections(
-                detection_supervision)
-
-            # define each key in the dict with another dict, then append the class id adn the position so we know where each object is at any given frame
+        for frame_num, frame in enumerate(frames):
             tracks["players"].append({})
             tracks["referees"].append({})
             tracks["ball"].append({})
 
-            for frame_detection in detection_with_tracks:
-                # get the bounding box of the object, frame_detection[0] is the xyxy coordintes of each bounding box it finds, mask is 1, confidence is 2, class id is 3
-                bbox = frame_detection[0].tolist()
-                cls_id = frame_detection[3]
-                track_id = frame_detection[4]
+            results = self.model.track(
+                frame,
+                persist=True,
+                tracker=tracker_config,
+                conf=0.1,
+                verbose=False
+            )
 
-                # add tracking to ref and players, not ball since its only one
-                if cls_id == cls_names_inv["player"]:
+            result = results[0]
+
+            if result.boxes is None:
+                continue
+
+            bboxes = result.boxes.xyxy.cpu().tolist()
+            cls_ids = result.boxes.cls.cpu().int().tolist()
+            track_ids = self.get_track_ids(result)
+
+            for bbox, cls_id, track_id in zip(bboxes, cls_ids, track_ids):
+                object_type = result.names[cls_id]
+
+                if object_type == "goalkeeper":
+                    object_type = "player"
+
+                if object_type == "player" and track_id is not None:
                     tracks["players"][frame_num][track_id] = {"bbox": bbox}
 
-                if cls_id == cls_names_inv["referee"]:
+                elif object_type == "referee" and track_id is not None:
                     tracks["referees"][frame_num][track_id] = {"bbox": bbox}
 
-            # now just the ball, since theres no need to track an id to it since its only one ball, so can hardcode track id as 1
-            for frame_detection in detection_supervision:
-                bbox = frame_detection[0].tolist()
-                cls_id = frame_detection[3]
-
-                if cls_id == cls_names_inv["ball"]:
+                elif object_type == "ball":
                     tracks["ball"][frame_num][1] = {"bbox": bbox}
 
-            if stub_path is not None:
-                with open(stub_path, 'wb') as f:
-                    pickle.dump(tracks, f)
+        if stub_path is not None:
+            with open(stub_path, 'wb') as f:
+                pickle.dump(tracks, f)
 
         # returns a list of dictionaries, with the positions of each bounding box at a certain frame
         return tracks
+
+    def get_track_ids(self, result):
+        if result.boxes.id is None:
+            return [None] * len(result.boxes)
+
+        return result.boxes.id.cpu().int().tolist()
 
     # define ellipse drawing
     def draw_ellipse(self, frame, bbox, colour, track_id=None):
