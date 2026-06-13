@@ -2,7 +2,7 @@ from utils import read_video, save_video
 from camera_filter import MainCameraFilter
 from gameplay_filter import GameplayFilter
 from segments import MainCameraSegmenter
-from team_assigner import TeamAssigner
+from new_team_assigner import NewTeamAssigner
 from trackers import Tracker
 from numberAssigner import NumberAssigner
 
@@ -10,7 +10,11 @@ from numberAssigner import NumberAssigner
 
 MODEL_PATH = "models/best.pt"
 VIDEO_PATH = "input_videos/youtube_15_30_16_30.mp4"
-STUB_PATH = "stubs/youtube_15_30_16_30_gameplay_tracks.pkl"
+STUB_PATH = "stubs/youtube_15_30_16_30_botsort_reid_tracks.pkl"
+GAMEPLAY_STUB_PATH = "stubs/youtube_15_30_16_30_gameplay_frame_indexes.pkl"
+SEGMENTS_STUB_PATH = "stubs/youtube_15_30_16_30_segments.pkl"
+CAMERA_FILTER_STUB_PATH = "stubs/youtube_15_30_16_30_main_camera_frame_indexes.pkl"
+TEAM_ASSIGNER_STUB_PATH = "stubs/youtube_15_30_16_30_team_assigner.pkl"
 OUTPUT_PATH = "output_videos/output_video.avi"
 
 # first get only the video frames
@@ -29,12 +33,15 @@ def main():
     # Keep only gameplay footage.
     gameplay_filter = GameplayFilter(
         green_threshold=5,
-        debug=True,
+        debug=False,
         debug_every=25
     )
     video_frames, _ = gameplay_filter.filter_video_frames(
-        original_video_frames
+        original_video_frames,
+        read_from_stub=True,
+        stub_path=GAMEPLAY_STUB_PATH
     )
+    
 
     # Define tracks.
     tracker = Tracker(MODEL_PATH)
@@ -43,6 +50,7 @@ def main():
         read_from_stub=True,
         stub_path=STUB_PATH,
     )
+    
 
     # Define camera filter.
     camera_filter = MainCameraFilter(
@@ -56,35 +64,53 @@ def main():
     segmenter = MainCameraSegmenter(camera_filter)
     segments = segmenter.get_main_camera_segments(
         video_frames,
-        tracks
+        tracks,
+        read_from_stub=True,
+        stub_path=SEGMENTS_STUB_PATH
     )
-    print(f"Main camera segments: {segments}")
+    
 
     # Assign teams.
-    team_assigner = TeamAssigner()
-    tracks = team_assigner.assign_player_teams(video_frames, tracks)
+    team_assigner = NewTeamAssigner()
+    tracks = team_assigner.assign_player_teams(
+        video_frames,
+        tracks,
+        segments,
+        read_from_stub=False,
+        stub_path=TEAM_ASSIGNER_STUB_PATH
+    )
+    
+    print("TRACKS[PLAYERS][0] = ", tracks["players"][0])
 
     # Assign player numbers.
     number_assigner = NumberAssigner(
         confidence_score=0.7
     )
+    
+    tracklets = number_assigner.build_tracklets(segments, video_frames, tracks)
 
-    predicted_numbers = number_assigner.predict_number(
-        video_frames,
-        segments,
-        tracks
-    )
+    # predicted_numbers = number_assigner.predict_number(
+    #     video_frames,
+    #     segments,
+    #     tracks
+    # )
 
     # Keep only main camera frames for output.
     output_video_frames, output_tracks, _ = camera_filter.filter_video_frames(
         video_frames,
-        tracks
+        tracks,
+        read_from_stub=False,
+        stub_path=CAMERA_FILTER_STUB_PATH
     )
+    
+    
 
     # Draw and save output.
     output_video_frames = tracker.draw_annotations(
         output_video_frames,
-        output_tracks
+        output_tracks,
+        read_from_stub=False,
+        stub_path=None
     )
     save_video(output_video_frames, OUTPUT_PATH)
 

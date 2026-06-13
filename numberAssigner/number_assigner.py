@@ -1,81 +1,147 @@
 import cv2
 import os
+import numpy as np
 
 
 class NumberAssigner:
     def __init__(
         self,
-        confidence_score
-    ): 
+        confidence_score,
+        frame_window=30
+    ):
         self.confidence_score = confidence_score
+        self.frame_window = frame_window
+
+    
+    
+
+    # function to create a big dictionary in the format of tracklets = {
+    #     (segment_id, track_id): {
+    #         "segment": segment_id,
+    #         "track_id": track_id,
+    #         "start_frame": first_seen,
+    #         "end_frame": last_seen,
+    #         "team": team,
+    #         "number_predictions": []
+    #     }
+    # }
+    # loop through each segment, then in each frame check if (seg_num, track_id ) is in it, if not make it
+    def build_tracklets(self, segments, video_frames, tracks):
+        final_frame = len(video_frames) - 1
+        main_dictionary = {}
+        for segment_num, seg in segments.items():
+            start_frame, end_frame = seg['start_frame'], seg['end_frame']
+            for frame_num in range(start_frame, end_frame):
+                player_tracks = tracks["players"][frame_num]
+                # print("player_tracks: ", player_tracks)
+                for track_id, bbox in player_tracks.items():
+                    # check the dictionary, if the seg + track id combo is there, update its end frame, otherwise add the start and frame for it
+                    if (segment_num, track_id) in main_dictionary:
+                        # at least a second of the same track id only
+                        # print("CURRENT FRAME: ", frame_num)
+                        # print("START FRAME: ", main_dictionary[(segment_num, track_id)]["start_frame"])
+
+                        main_dictionary[(segment_num, track_id)
+                                        ]["end_frame"] = frame_num
+                        main_dictionary[(segment_num, track_id)]["frames"].append(frame_num)
+
+                    else:
+                        main_dictionary[(segment_num, track_id)] = {}
+                        self.populate_dictionary(
+                            main_dictionary, segment_num, track_id, player_tracks, frame_num)
+
         
+        main_dictionary = self.clean_dictionary(main_dictionary)
         
-    # go through each segment to get the frames for it
-    # choose every nth frame
-    # for that frame go through the tracks and select them to be cropped and tested for which number they are wearing
-    def predict_number(self, video_frames, segments, tracks=None):
-        predicted_numbers = {}
-        n = 5
-        max_crops_per_player = 6
-        os.makedirs("crops", exist_ok=True)
 
-        for segment_id, seg in segments.items():
-            num_crops = {}
+        # Now loop through the tracklets, and for each one get the candidate
+        for identifier, info in main_dictionary.items():
+            
 
-            for frame_number in range(seg["start_frame"], seg["end_frame"] + 1, n):
-                frame = video_frames[frame_number]
-                player_tracks = tracks["players"][frame_number]
+            candidate_frames = self.select_frames_for_prediction(info)
+            info['candidate_frames'] = candidate_frames
+            
+        # now check these candidate frames and place them into the file
+        self.check_candidate(main_dictionary, video_frames, tracks)
 
-                for player_id, track in player_tracks.items():
-                    if player_id not in num_crops:
-                        num_crops[player_id] = 0
+        return main_dictionary
 
-                    if num_crops[player_id] >= max_crops_per_player:
-                        continue
+     # this function takes in tracklets dictionary, and adds candidate frames to it
+    def select_frames_for_prediction(self, track):
+        frames = track["frames"]
 
-                    bbox = track["bbox"]
-
-                    x1, y1, x2, y2 = bbox
-                    h, w = frame.shape[:2]
-
-                    x1 = max(0, int(x1))
-                    y1 = max(0, int(y1))
-                    x2 = min(w, int(x2))
-                    y2 = min(h, int(y2))
-                    
-                    height = y2 - y1
-                    width = x2-x1
-
-                    if height <= 0 or width <= 0:
-                        continue
-
-                    player_crop = frame[y1:y2, x1:x2]
-                    
-                    # if self.good_cropping(player_crop, height, width):
-                    #     # then save it and use it later to get the actual number, pass in the player id as well
-                    #     crop_folder = f"crops/segment_{segment_id}/track_{player_id}"
-                    #     os.makedirs(crop_folder, exist_ok=True)
-
-                    #     cv2.imwrite(
-                    #         f"{crop_folder}/frame_{frame_number}.jpg",
-                    #         player_crop
-                    #     )
-                        
-                    #     num_crops[player_id] += 1
-                        
-                    #     # run number model here
+        if len(frames) <= 10:
+            candidate_frames = frames
+        else:
+            indexes = np.linspace(0, len(frames) - 1, 10, dtype=int)
+            candidate_frames = [frames[i] for i in indexes]
         
-        return predicted_numbers
 
+        return candidate_frames
+
+    def populate_dictionary(self, dictionary, segment_num, track_id, player_tracks, frame_num):
+        dictionary[(segment_num, track_id)]["start_frame"] = frame_num
+        dictionary[(segment_num, track_id)]["end_frame"] = frame_num
+        dictionary[(segment_num, track_id)]["track_id"] = track_id
+        dictionary[(segment_num, track_id)
+                   ]["team"] = player_tracks[track_id]['team']
+        dictionary[(segment_num, track_id)]["segment"] = segment_num
+        dictionary[(segment_num, track_id)]["frames"] = [frame_num]
+
+    def clean_dictionary(self, dictionary):
+        for identifier, info in list(dictionary.items()):
+            if info['end_frame'] - info['start_frame'] < self.frame_window:
+                dictionary.pop(identifier)
+                
+        return dictionary
+    
+    # now using the cnadidate frames in each tracklet, check if they are GOOD crops using gdef good cropping
+    # then using the final frames - send it to the uncertainty
+    def check_candidate(self, dictionary, video_frames, tracks):
+        for identifier, info in list(dictionary.items()):
+            segment_id, track_id = identifier
+            candidates = info['candidate_frames']
+            for frame in candidates:
+                frame_image = video_frames[frame]
+                player_bbox = tracks["players"][frame][track_id]["bbox"]
+                x1, y1, x2, y2 = player_bbox
+
+                h, w = frame_image.shape[:2]
+
+                x1 = max(0, int(x1))
+                y1 = max(0, int(y1))
+                x2 = min(w, int(x2))
+                y2 = min(h, int(y2))
+
+                height = y2 - y1
+                width = x2 - x1
+
+                player_crop = frame_image[y1:y2, x1:x2]
+                
+                if self.good_cropping(player_crop, height, width):
+                    # use this crop
+                    crop_folder = f"crops/segment_{segment_id}/track_{track_id}"
+                    os.makedirs(crop_folder, exist_ok=True)
+
+                    crop_path = (
+                        f"{crop_folder}/"
+                        f"segment_{segment_id}_track_{track_id}_frame_{frame}.jpg"
+                    )
+
+                    cv2.imwrite(crop_path, player_crop)
+                    pass
+                                
+    
+    # now use the uncertainty model on the candidate frames
     def good_cropping(self, player_crop, height, width):
         if height < 80 or width < 30:
             return False
-        
+
         gray = cv2.cvtColor(player_crop, cv2.COLOR_BGR2GRAY)
         blur_score = cv2.Laplacian(gray, cv2.CV_64F).var()
-        
+
         if blur_score < 50:
             # blurry
             return False
-        
+
         return True

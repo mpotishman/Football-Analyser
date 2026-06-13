@@ -1,4 +1,6 @@
 import cv2
+import pickle
+import os
 
 
 class MainCameraFilter:
@@ -40,16 +42,28 @@ class MainCameraFilter:
             if keep_frame
         ]
 
-    def filter_video_frames(self, video_frames, tracks):
-        main_camera_frame_indexes = self.get_main_camera_frame_indexes(
-            video_frames,
-            tracks
-        )
+    def filter_video_frames(self, video_frames, tracks, read_from_stub=False, stub_path=None):
+        main_camera_frame_indexes = None
 
-        print(
-            "Frames kept by grass filter: "
-            f"{len(main_camera_frame_indexes)} / {len(video_frames)}"
-        )
+        if read_from_stub and stub_path is not None and os.path.exists(stub_path):
+            with open(stub_path, 'rb') as f:
+                stub_data = pickle.load(f)
+
+            if isinstance(stub_data, tuple):
+                main_camera_frame_indexes = stub_data[2]
+            else:
+                main_camera_frame_indexes = stub_data
+
+        if main_camera_frame_indexes is None:
+            main_camera_frame_indexes = self.get_main_camera_frame_indexes(
+                video_frames,
+                tracks
+            )
+
+            print(
+                "Frames kept by grass filter: "
+                f"{len(main_camera_frame_indexes)} / {len(video_frames)}"
+            )
 
         if not main_camera_frame_indexes:
             raise ValueError("No frames were kept by the grass filter.")
@@ -63,6 +77,10 @@ class MainCameraFilter:
             ]
             for object_type, object_tracks in tracks.items()
         }
+
+        if stub_path is not None:
+            with open(stub_path, 'wb') as f:
+                pickle.dump(main_camera_frame_indexes, f)
 
         return filtered_video_frames, filtered_tracks, main_camera_frame_indexes
 

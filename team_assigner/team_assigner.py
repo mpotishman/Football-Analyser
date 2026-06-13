@@ -1,4 +1,6 @@
 from sklearn.cluster import KMeans
+import pickle
+import os
 
 class TeamAssigner:
     def __init__(self):
@@ -55,7 +57,11 @@ class TeamAssigner:
         self.team_colours[1] = kmeans.cluster_centers_[0]
         self.team_colours[2] = kmeans.cluster_centers_[1]
 
-    def assign_player_teams(self, video_frames, tracks):
+    def assign_player_teams(self, video_frames, tracks, read_from_stub=False, stub_path=None):
+        if read_from_stub and stub_path is not None and os.path.exists(stub_path):
+            with open(stub_path, 'rb') as f:
+                return pickle.load(f)
+
         self.assign_team_colour(video_frames[0], tracks["players"][0])
 
         for frame_number, player_track in enumerate(tracks["players"]):
@@ -70,6 +76,10 @@ class TeamAssigner:
                 tracks["players"][frame_number][player_id]["team_colour"] = (
                     self.team_colours[team]
                 )
+
+        if stub_path is not None:
+            with open(stub_path, 'wb') as f:
+                pickle.dump(tracks, f)
 
         return tracks
 

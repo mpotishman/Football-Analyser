@@ -1,4 +1,6 @@
 import cv2
+import pickle
+import os
 
 
 class GameplayFilter:
@@ -18,13 +20,25 @@ class GameplayFilter:
 
         return gameplay_frame_indexes
 
-    def filter_video_frames(self, video_frames):
-        gameplay_frame_indexes = self.get_gameplay_frame_indexes(video_frames)
+    def filter_video_frames(self, video_frames, read_from_stub=False, stub_path=None):
+        gameplay_frame_indexes = None
 
-        print(
-            "Frames kept by gameplay filter: "
-            f"{len(gameplay_frame_indexes)} / {len(video_frames)}"
-        )
+        if read_from_stub and stub_path is not None and os.path.exists(stub_path):
+            with open(stub_path, 'rb') as f:
+                stub_data = pickle.load(f)
+
+            if isinstance(stub_data, tuple):
+                gameplay_frame_indexes = stub_data[1]
+            else:
+                gameplay_frame_indexes = stub_data
+
+        if gameplay_frame_indexes is None:
+            gameplay_frame_indexes = self.get_gameplay_frame_indexes(video_frames)
+
+            print(
+                "Frames kept by gameplay filter: "
+                f"{len(gameplay_frame_indexes)} / {len(video_frames)}"
+            )
 
         if not gameplay_frame_indexes:
             raise ValueError("No frames were kept by the gameplay filter.")
@@ -32,6 +46,10 @@ class GameplayFilter:
         filtered_video_frames = [
             video_frames[index] for index in gameplay_frame_indexes
         ]
+
+        if stub_path is not None:
+            with open(stub_path, 'wb') as f:
+                pickle.dump(gameplay_frame_indexes, f)
 
         return filtered_video_frames, gameplay_frame_indexes
 

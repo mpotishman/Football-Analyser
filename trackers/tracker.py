@@ -188,7 +188,7 @@ class Tracker:
         
     # Create easier to see bounding boxes
 
-    def draw_annotations(self, video_frames, tracks):
+    def draw_annotations(self, video_frames, tracks, read_from_stub=False, stub_path=None):
         output_video_frames = []
         for frame_num, frame in enumerate(video_frames):
             frame = frame.copy()
@@ -197,9 +197,10 @@ class Tracker:
             ball_dict = tracks["ball"][frame_num]
             referee_dict = tracks["referees"][frame_num]
 
-            # draw players, right now player_dict = {track_id: bbox} - track id is passed as wikk be used to show each different player ID
+            # draw players, right now player_dict = {track_id: bbox} - track id is passed as will be used to show each different player ID
             for track_id, player in player_dict.items():
-                colour = player.get("team_colour", (0,0,255))
+                colour = player.get("team_colour", (0, 0, 255))
+                colour = self.brighten_colour(colour)
                 frame = self.draw_ellipse(
                     frame, player["bbox"], (colour), track_id)
 
@@ -207,13 +208,20 @@ class Tracker:
             for track_id, ref in referee_dict.items():
                 frame = self.draw_ellipse(
                     frame, ref["bbox"], (0, 255, 255))
-                
+
             # draw ball
             for track_id, ball in ball_dict.items():
                 frame = self.draw_triangle(
                     frame, ball["bbox"], (0, 255, 0))
-                
+
 
             output_video_frames.append(frame)
 
         return output_video_frames
+    
+    #  brighten the colours for display
+    def brighten_colour(self, colour, factor=1.4):
+        colour = np.array(colour, dtype=np.float32)
+        colour = colour * factor
+        colour = np.clip(colour, 0, 255)
+        return tuple(colour.astype(int).tolist())

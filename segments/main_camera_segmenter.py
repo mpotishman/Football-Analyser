@@ -1,9 +1,17 @@
+import pickle
+import os
+
+
 class MainCameraSegmenter:
-    def __init__(self, camera_filter, min_segment_frames=1):
+    def __init__(self, camera_filter, min_segment_frames=20):
         self.camera_filter = camera_filter
         self.min_segment_frames = min_segment_frames
 
-    def get_main_camera_segments(self, video_frames, tracks=None):
+    def get_main_camera_segments(self, video_frames, tracks=None, read_from_stub=False, stub_path=None):
+        if read_from_stub and stub_path is not None and os.path.exists(stub_path):
+            with open(stub_path, 'rb') as f:
+                return pickle.load(f)
+
         segments = {}
         segment_id = 0
         in_main_camera = False
@@ -42,6 +50,10 @@ class MainCameraSegmenter:
                 segment_start_frame,
                 len(video_frames) - 1
             )
+
+        if stub_path is not None:
+            with open(stub_path, 'wb') as f:
+                pickle.dump(segments, f)
 
         return segments
 
