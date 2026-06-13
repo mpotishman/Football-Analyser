@@ -87,7 +87,8 @@ def main():
         confidence_score=0.7
     )
     
-    tracklets = number_assigner.build_tracklets(segments, video_frames, tracks)
+    tracklets, summary = number_assigner.build_tracklets(segments, video_frames, tracks)
+    print(summary)
 
     # predicted_numbers = number_assigner.predict_number(
     #     video_frames,

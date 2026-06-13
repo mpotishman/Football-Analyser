@@ -27,11 +27,10 @@ class NumberAssigner:
     # }
     # loop through each segment, then in each frame check if (seg_num, track_id ) is in it, if not make it
     def build_tracklets(self, segments, video_frames, tracks):
-        final_frame = len(video_frames) - 1
         main_dictionary = {}
         for segment_num, seg in segments.items():
             start_frame, end_frame = seg['start_frame'], seg['end_frame']
-            for frame_num in range(start_frame, end_frame):
+            for frame_num in range(start_frame, end_frame + 1):
                 player_tracks = tracks["players"][frame_num]
                 # print("player_tracks: ", player_tracks)
                 for track_id, bbox in player_tracks.items():
@@ -52,7 +51,7 @@ class NumberAssigner:
 
         
         main_dictionary = self.clean_dictionary(main_dictionary)
-        
+        main_dictionary = self.assign_tracklet_teams(main_dictionary, tracks)
 
         # Now loop through the tracklets, and for each one get the candidate
         for identifier, info in main_dictionary.items():
@@ -64,7 +63,7 @@ class NumberAssigner:
         # now check these candidate frames and place them into the file
         self.check_candidate(main_dictionary, video_frames, tracks)
 
-        return main_dictionary
+        return main_dictionary, self.make_printable_tracklets(main_dictionary)
 
      # this function takes in tracklets dictionary, and adds candidate frames to it
     def select_frames_for_prediction(self, track):
@@ -78,13 +77,21 @@ class NumberAssigner:
         
 
         return candidate_frames
+    
+    def make_printable_tracklets(self, dictionary):
+        printable = {}
+
+        for identifier, info in dictionary.items():
+            printable[identifier] = info.copy()
+            printable[identifier].pop("frames", None)
+
+        return printable
 
     def populate_dictionary(self, dictionary, segment_num, track_id, player_tracks, frame_num):
         dictionary[(segment_num, track_id)]["start_frame"] = frame_num
         dictionary[(segment_num, track_id)]["end_frame"] = frame_num
         dictionary[(segment_num, track_id)]["track_id"] = track_id
-        dictionary[(segment_num, track_id)
-                   ]["team"] = player_tracks[track_id]['team']
+        dictionary[(segment_num, track_id)]["team"] = None
         dictionary[(segment_num, track_id)]["segment"] = segment_num
         dictionary[(segment_num, track_id)]["frames"] = [frame_num]
 
@@ -93,6 +100,27 @@ class NumberAssigner:
             if info['end_frame'] - info['start_frame'] < self.frame_window:
                 dictionary.pop(identifier)
                 
+        return dictionary
+
+    def assign_tracklet_teams(self, dictionary, tracks):
+        for identifier, info in dictionary.items():
+            track_id = info["track_id"]
+            team_counts = {}
+
+            for frame in info["frames"]:
+                player = tracks["players"][frame].get(track_id)
+                if player is None:
+                    continue
+
+                team = player.get("team")
+                if team is None:
+                    continue
+
+                team_counts[team] = team_counts.get(team, 0) + 1
+
+            if team_counts:
+                info["team"] = max(team_counts, key=team_counts.get)
+
         return dictionary
     
     # now using the cnadidate frames in each tracklet, check if they are GOOD crops using gdef good cropping
