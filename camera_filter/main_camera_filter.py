@@ -60,10 +60,10 @@ class MainCameraFilter:
                 tracks
             )
 
-            print(
-                "Frames kept by grass filter: "
-                f"{len(main_camera_frame_indexes)} / {len(video_frames)}"
-            )
+            # print(
+            #     "Frames kept by grass filter: "
+            #     f"{len(main_camera_frame_indexes)} / {len(video_frames)}"
+            # )
 
         if not main_camera_frame_indexes:
             raise ValueError("No frames were kept by the grass filter.")

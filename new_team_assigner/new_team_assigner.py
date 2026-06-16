@@ -4,11 +4,26 @@ import os
 import cv2
 import numpy as np
 
-
 class NewTeamAssigner:
     def __init__(self):
         self.team_colours = {}
         self.player_team_dict = {}  # player_id : team 1 / 2
+        
+    def display_tracks(self, tracks):
+        for track in tracks["players"]:
+            print(f'{track} \n\n')
+
+    # this function walks every frame and prints each player's full track info (team, colour, bbox
+    # and anything else stored) so you can read off that, at frame x, track id y is team z
+    def summarise_tracks(self, tracks):
+        for frame_num, player_tracks in enumerate(tracks["players"]):
+            if not player_tracks:
+                continue
+            print(f"Frame {frame_num}:")
+            for track_id, info in player_tracks.items():
+                print(f"  Track {track_id} | team {info.get('team')} | {info}")
+
+
 
     def assign_player_teams(self, video_frames, tracks, segments, read_from_stub=False, stub_path=None):
         if read_from_stub and stub_path is not None and os.path.exists(stub_path):
@@ -20,17 +35,41 @@ class NewTeamAssigner:
         
         # now cluster these colours into 2 colours
         clustered_colours = self.cluster_team_colours(all_colours)
+        
+        # call collect_votes, which returns per (segment_id, track_id) tracklet a parallel
+        # "frames" and "votes" list (vote is 1 / 2, or None when overlapped / unreadable)
+        team_vote_dictionary = self.collect_votes(video_frames, segments, tracks )
+
+        # go through each tracklet, smooth its votes into a stable per-frame team, then write
+        # that team (and its colour) back onto every frame the player appears in
+        for (segment_id, track_id), verdict in team_vote_dictionary.items():
+            final_teams = self.smooth_votes(verdict["votes"])
+            self.write_teams_to_tracks(tracks, track_id, verdict["frames"], final_teams)
+                
+        
+        
+        
+        # for info, teams in team_vote_dictionary.items():
+        #     if info[1] == 516:
+                
+        #         print(f"Segment {info[0]} Track {info[1]} is team {teams.values()} at frame {teams.keys()} \n")
+        
+        # print("TEAM DICTIONARY: ", team_vote_dictionary)
     
-        for frame_number, frame in enumerate(video_frames):
-            player_tracks = tracks["players"][frame_number]
-            for track_id, info in player_tracks.items():
-                bbox = info["bbox"]
-                team = self.assign_single_player_team(frame, bbox, track_id)
-                tracks["players"][frame_number][track_id]["team"] = team
-                if team is None:
-                    tracks["players"][frame_number][track_id]["team_colour"] = (180, 180, 180)
-                else:
-                    tracks["players"][frame_number][track_id]["team_colour"] = self.team_colours[team]
+        # for frame_number, frame in enumerate(video_frames):
+        #     player_tracks = tracks["players"][frame_number]
+        #     for track_id, info in player_tracks.items():
+            
+                    
+        #         bbox = info["bbox"]
+        #         team = self.assign_single_player_team(frame, bbox, track_id)
+                
+        #         if team is None:
+        #             tracks["players"][frame_number][track_id]["team_colour"] = (180, 180, 180)
+        #         else:
+        #             tracks["players"][frame_number][track_id]["team_colour"] = self.team_colours[team]
+                    
+                
                     
         
         if stub_path is not None:
@@ -38,7 +77,6 @@ class NewTeamAssigner:
 
         return tracks
                 
-        return tracks
 
     def learn_team_colours(self, video_frames, segments, tracks):
         # now learn the teams colours by looking at the frames
@@ -215,6 +253,109 @@ class NewTeamAssigner:
             return 1
 
         return 2
+    
+    # Builds, per (segment_id, track_id) tracklet, a 'votes' list where each index
+    # is the team (1 or 2) assigned to that player in that frame — or None if the
+    # player was too overlapped / unreadable in that frame. Aligned 1-to-1 with 'frames'.
+    
+    # this function takes in the track id and the player tracks - then checks if players bbox is a good frame and if it is it gets the players teams and outputs it ina. dictionary
+    # in the format of frame: team. team is NONE if the overlap between boxes is too high  
+    def collect_votes(self, video_frames, segments, tracks, occlusion_threshold=0.25):
+        tracklets = {}
+        for segment_id, seg in segments.items():
+            for frame_num in range(seg["start_frame"], seg["end_frame"]):
+                player_tracks = tracks["players"][frame_num]
+                all_bboxes = [info["bbox"] for info in player_tracks.values()]
+                for track_id, info in player_tracks.items():
+                    bbox = info["bbox"]
+                    vote = None
+                    if self.max_overlap(bbox, all_bboxes) <= occlusion_threshold:
+                        colour = self.get_player_colour(video_frames[frame_num], bbox)
+                        if colour is not None:
+                            vote = self.compare_to_team_colours(colour)
+                    key = (segment_id, track_id)
+                    if key not in tracklets:
+                        tracklets[key] = {"frames": [], "votes": []}
+                    tracklets[key]["frames"].append(frame_num)
+                    tracklets[key]["votes"].append(vote)
+        return tracklets
+
+    def max_overlap(self, bbox, all_bboxes):
+        best = 0.0
+        for other in all_bboxes:
+            if other is bbox:
+                continue
+            overlap = self.overlap_fraction(bbox, other)
+            if overlap > best:
+                best = overlap
+        return best
+
+    def overlap_fraction(self, a, b):
+        ax1, ay1, ax2, ay2 = a
+        bx1, by1, bx2, by2 = b
+        inter_w = max(0, min(ax2, bx2) - max(ax1, bx1))
+        inter_h = max(0, min(ay2, by2) - max(ay1, by1))
+        inter = inter_w * inter_h
+        area_a = max(0, ax2 - ax1) * max(0, ay2 - ay1)
+        if area_a == 0:
+            return 0.0
+        return inter / area_a
+    
+    # this function takes a tracklet's votes list and smooths it into a stable per-frame team.
+    # for each frame it looks at a window of nearby votes and keeps the current team unless the
+    # other team clearly takes over that window - this ignores brief overlap flicker but still
+    # follows a real, sustained id switch. returns a list of teams (1 / 2 / None) aligned with votes
+    def smooth_votes(self, votes, half_window=12, flip_threshold=0.65, min_votes=5):
+        final_teams = []
+        current_team = None
+
+        for i in range(len(votes)):
+            start = max(0, i - half_window)
+            end = min(len(votes), i + half_window + 1)
+
+            no_1, no_2 = 0, 0
+            for vote in votes[start:end]:
+                if vote == 1:
+                    no_1 += 1
+                elif vote == 2:
+                    no_2 += 1
+
+            total = no_1 + no_2
+
+            # only trust the window once it holds enough real (non-None) votes
+            if total >= min_votes:
+                leader = 1 if no_1 >= no_2 else 2
+                leader_share = max(no_1, no_2) / total
+
+                if current_team is None:
+                    # the first confident window seeds the team
+                    current_team = leader
+                elif leader != current_team and leader_share >= flip_threshold:
+                    # only flip once the other team clearly dominates the window
+                    current_team = leader
+
+            final_teams.append(current_team)
+
+        return final_teams
+
+    # this function writes one decided team onto every frame the player appears in, setting both
+    # the team and the team_colour so the drawing step can colour the player correctly
+    def write_teams_to_tracks(self, tracks, track_id, frames, final_teams):
+        for frame_num, team in zip(frames, final_teams):
+            player = tracks["players"][frame_num].get(track_id)
+            if player is None:
+                continue
+            player["team"] = team
+            player["team_colour"] = self.colour_for_team(team)
+
+    # this function returns the kit colour for a team, or a neutral grey when the team is unknown
+    def colour_for_team(self, team):
+        if team is None:
+            return (180, 180, 180)
+        return self.team_colours[team]
+
+
+            
 
     # this function checks to see if it should recaclulate a players colour, if the track id not in there, or player colour is NOT none
     def should_use_cached_team(self, track_id, player_colour=None):

@@ -79,7 +79,7 @@ class Tracker:
                 frame,
                 persist=True,
                 tracker=tracker_config,
-                conf=0.1,
+                conf=0.25,
                 verbose=False
             )
 

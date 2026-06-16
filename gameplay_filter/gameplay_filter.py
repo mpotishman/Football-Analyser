@@ -35,10 +35,10 @@ class GameplayFilter:
         if gameplay_frame_indexes is None:
             gameplay_frame_indexes = self.get_gameplay_frame_indexes(video_frames)
 
-            print(
-                "Frames kept by gameplay filter: "
-                f"{len(gameplay_frame_indexes)} / {len(video_frames)}"
-            )
+            # print(
+            #     "Frames kept by gameplay filter: "
+            #     f"{len(gameplay_frame_indexes)} / {len(video_frames)}"
+            # )
 
         if not gameplay_frame_indexes:
             raise ValueError("No frames were kept by the gameplay filter.")

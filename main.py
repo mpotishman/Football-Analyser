@@ -69,6 +69,8 @@ def main():
         stub_path=SEGMENTS_STUB_PATH
     )
     
+    # print(tracks)
+
 
     # Assign teams.
     team_assigner = NewTeamAssigner()
@@ -79,8 +81,13 @@ def main():
         read_from_stub=False,
         stub_path=TEAM_ASSIGNER_STUB_PATH
     )
-    
-    print("TRACKS[PLAYERS][0] = ", tracks["players"][0])
+
+    # Print every frame's players with their assigned team and full track info.
+    team_assigner.summarise_tracks(tracks)
+
+
+
+    # print("TRACKS[PLAYERS][0] = ", tracks["players"][0])
 
     # Assign player numbers.
     number_assigner = NumberAssigner(
@@ -88,7 +95,7 @@ def main():
     )
     
     tracklets, summary = number_assigner.build_tracklets(segments, video_frames, tracks)
-    print(summary)
+    # print(summary)
 
     # predicted_numbers = number_assigner.predict_number(
     #     video_frames,
