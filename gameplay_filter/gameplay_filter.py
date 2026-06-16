@@ -1,6 +1,7 @@
 import cv2
 import pickle
 import os
+from utils import FrameSubset
 
 
 class GameplayFilter:
@@ -43,9 +44,7 @@ class GameplayFilter:
         if not gameplay_frame_indexes:
             raise ValueError("No frames were kept by the gameplay filter.")
 
-        filtered_video_frames = [
-            video_frames[index] for index in gameplay_frame_indexes
-        ]
+        filtered_video_frames = FrameSubset(video_frames, gameplay_frame_indexes)
 
         if stub_path is not None:
             with open(stub_path, 'wb') as f:

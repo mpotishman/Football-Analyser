@@ -83,10 +83,10 @@ class NumberAssigner:
     def select_frames_for_prediction(self, track):
         frames = track["frames"]
 
-        if len(frames) <= 10:
+        if len(frames) <= 20:
             candidate_frames = frames
         else:
-            indexes = np.linspace(0, len(frames) - 1, 10, dtype=int)
+            indexes = np.linspace(0, len(frames) - 1, 20, dtype=int)
             candidate_frames = [frames[i] for i in indexes]
         
 
@@ -153,8 +153,18 @@ class NumberAssigner:
     # now using the cnadidate frames in each tracklet, check if they are GOOD crops using gdef good cropping
     # then using the final frames - send it to the uncertainty
     def check_candidate(self, dictionary, video_frames, tracks):
-        for identifier, info in list(dictionary.items()):
+        items = list(dictionary.items())
+        total = len(items)
+        for i, (identifier, info) in enumerate(items, start=1):
             segment_id, track_id = identifier
+            print(f"Reading numbers: tracklet {i}/{total} (segment {segment_id}, track {track_id})")
+
+            # skip number guessing for tracklets with no assigned team - they're unreliable
+            if info.get('team') is None:
+                info['good_candidates'] = []
+                info['number_predictions'] = []
+                continue
+
             candidates = info['candidate_frames']
             good_candidates = []
             number_predictions = []
@@ -194,7 +204,7 @@ class NumberAssigner:
                         # {"frame": 734, "number": "56", "confidence": 0.83}]
                         
                     player_kit_prediction, confidence = self.predict_number(player_crop)
-                    if player_kit_prediction is not None:
+                    if player_kit_prediction is not None and confidence >= self.confidence_score:
                         number_predictions.append((frame, player_kit_prediction, confidence))
 
             info['good_candidates'] = good_candidates
@@ -222,11 +232,27 @@ class NumberAssigner:
     # loads the PARSeq scene-text recogniser once and caches it on the instance
     def load_recogniser(self):
         if self.recogniser is None:
-            self.recogniser = torch.hub.load(
-                'baudm/parseq', 'parseq', pretrained=True, trust_repo=True
-            ).eval().to(self.device)
+            import sys
+            # reuse the parseq source torch.hub already downloaded, so we can load a local checkpoint
+            parseq_repo = os.path.join(torch.hub.get_dir(), "baudm_parseq_main")
+            if parseq_repo not in sys.path:
+                sys.path.insert(0, parseq_repo)
+            from strhub.models.utils import load_from_checkpoint # type: ignore
+
+            # Torch 2.6 defaults torch.load to weights_only=True, which rejects this trusted
+            # Lightning checkpoint. Force weights_only=False just for this load, then restore.
+            original_torch_load = torch.load
+            torch.load = lambda *args, **kwargs: original_torch_load(
+                *args, **{**kwargs, "weights_only": False}
+            )
+            try:
+                self.recogniser = load_from_checkpoint(
+                    "models/parseq_jersey_remap.ckpt"
+                ).eval().to(self.device)
+            finally:
+                torch.load = original_torch_load
         return self.recogniser
-    
+
         
         
     

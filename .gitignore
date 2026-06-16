@@ -11,3 +11,4 @@ output_videos/soccernet_data/
 output_videos/main_camera_debug_frames/
 output_videos/non_game_debug_frames/
 crops/
+*.ckpt

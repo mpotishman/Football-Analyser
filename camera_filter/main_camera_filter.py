@@ -1,6 +1,7 @@
 import cv2
 import pickle
 import os
+from utils import FrameSubset
 
 
 class MainCameraFilter:
@@ -68,9 +69,7 @@ class MainCameraFilter:
         if not main_camera_frame_indexes:
             raise ValueError("No frames were kept by the grass filter.")
 
-        filtered_video_frames = [
-            video_frames[index] for index in main_camera_frame_indexes
-        ]
+        filtered_video_frames = FrameSubset(video_frames, main_camera_frame_indexes)
         filtered_tracks = {
             object_type: [
                 object_tracks[index] for index in main_camera_frame_indexes
