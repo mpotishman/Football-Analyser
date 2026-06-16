@@ -10,7 +10,7 @@ from numberAssigner import NumberAssigner
 
 MODEL_PATH = "models/best.pt"
 VIDEO_PATH = "input_videos/youtube_15_30_16_30.mp4"
-STUB_PATH = "stubs/youtube_15_30_16_30_botsort_reid_tracks.pkl"
+STUB_PATH = "stubs/youtube_15_30_16_30_botsort_reid_tracks (1).pkl"
 GAMEPLAY_STUB_PATH = "stubs/youtube_15_30_16_30_gameplay_frame_indexes.pkl"
 SEGMENTS_STUB_PATH = "stubs/youtube_15_30_16_30_segments.pkl"
 CAMERA_FILTER_STUB_PATH = "stubs/youtube_15_30_16_30_main_camera_frame_indexes.pkl"
@@ -83,7 +83,7 @@ def main():
     )
 
     # Print every frame's players with their assigned team and full track info.
-    team_assigner.summarise_tracks(tracks)
+    team_assigner.summarise_tracks(tracks, segments)
 
 
 
@@ -95,13 +95,10 @@ def main():
     )
     
     tracklets, summary = number_assigner.build_tracklets(segments, video_frames, tracks)
-    # print(summary)
 
-    # predicted_numbers = number_assigner.predict_number(
-    #     video_frames,
-    #     segments,
-    #     tracks
-    # )
+    # Print each tracklet (segment, track_id) with its team, frame range and candidate frames.
+    number_assigner.summarise_tracklets(tracklets)
+
 
     # Keep only main camera frames for output.
     output_video_frames, output_tracks, _ = camera_filter.filter_video_frames(

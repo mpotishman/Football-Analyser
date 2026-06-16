@@ -13,15 +13,25 @@ class NewTeamAssigner:
         for track in tracks["players"]:
             print(f'{track} \n\n')
 
-    # this function walks every frame and prints each player's full track info (team, colour, bbox
-    # and anything else stored) so you can read off that, at frame x, track id y is team z
-    def summarise_tracks(self, tracks):
+    # this function walks every frame and prints each player's full track info on one line, in the
+    # same style as the tracklet summary - tagging each line with its segment, frame, team and info
+    def summarise_tracks(self, tracks, segments):
         for frame_num, player_tracks in enumerate(tracks["players"]):
             if not player_tracks:
                 continue
-            print(f"Frame {frame_num}:")
+            segment_id = self.segment_for_frame(frame_num, segments)
             for track_id, info in player_tracks.items():
-                print(f"  Track {track_id} | team {info.get('team')} | {info}")
+                print(
+                    f"Segment {segment_id} | Frame {frame_num} | Track {track_id} | "
+                    f"team {info.get('team')} | {info}"
+                )
+
+    # helper that returns which segment a frame belongs to, or None if it sits outside every segment
+    def segment_for_frame(self, frame_num, segments):
+        for segment_id, seg in segments.items():
+            if seg["start_frame"] <= frame_num <= seg["end_frame"]:
+                return segment_id
+        return None
 
 
 

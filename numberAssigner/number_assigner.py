@@ -1,6 +1,9 @@
 import cv2
 import os
 import numpy as np
+import torch
+import torchvision.transforms as T
+from PIL import Image
 
 
 class NumberAssigner:
@@ -11,6 +14,17 @@ class NumberAssigner:
     ):
         self.confidence_score = confidence_score
         self.frame_window = frame_window
+
+        # PARSeq scene-text recogniser, loaded lazily on first use
+        self.recogniser = None
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        # PARSeq expects a 32x128 image normalised to the range [-1, 1]
+        self.number_transform = T.Compose([
+            T.Resize((32, 128), T.InterpolationMode.BICUBIC),
+            T.ToTensor(),
+            T.Normalize(0.5, 0.5),
+        ])
 
     
     
@@ -55,13 +69,13 @@ class NumberAssigner:
 
         # Now loop through the tracklets, and for each one get the candidate
         for identifier, info in main_dictionary.items():
-            
-
             candidate_frames = self.select_frames_for_prediction(info)
             info['candidate_frames'] = candidate_frames
             
         # now check these candidate frames and place them into the file
         self.check_candidate(main_dictionary, video_frames, tracks)
+        
+   
 
         return main_dictionary, self.make_printable_tracklets(main_dictionary)
 
@@ -86,6 +100,19 @@ class NumberAssigner:
             printable[identifier].pop("frames", None)
 
         return printable
+
+    # this function prints each tracklet nicely - one line per (segment_id, track_id) showing its
+    # team, frame range and candidate frames, skipping the big per-frame "frames" list
+    def summarise_tracklets(self, tracklets):
+        for (segment_id, track_id), info in tracklets.items():
+            print(
+                f"Segment {segment_id} | Track {track_id} | "
+                f"team {info.get('team')} | "
+                f"frames {info.get('start_frame')}-{info.get('end_frame')} | "
+                f"candidates {info.get('candidate_frames')} | "
+                f"good candidates {info.get('good_candidates')} | "
+                f"number predictions (frame, number, conf) {info.get('number_predictions')}"
+            )
 
     def populate_dictionary(self, dictionary, segment_num, track_id, player_tracks, frame_num):
         dictionary[(segment_num, track_id)]["start_frame"] = frame_num
@@ -129,6 +156,8 @@ class NumberAssigner:
         for identifier, info in list(dictionary.items()):
             segment_id, track_id = identifier
             candidates = info['candidate_frames']
+            good_candidates = []
+            number_predictions = []
             for frame in candidates:
                 frame_image = video_frames[frame]
                 player_bbox = tracks["players"][frame][track_id]["bbox"]
@@ -147,17 +176,33 @@ class NumberAssigner:
                 player_crop = frame_image[y1:y2, x1:x2]
                 
                 if self.good_cropping(player_crop, height, width):
-                    # use this crop
-                    crop_folder = f"crops/segment_{segment_id}/track_{track_id}"
-                    os.makedirs(crop_folder, exist_ok=True)
+                    # use this crop - later if need to be placed in folder use code bELOW
+                    # crop_folder = f"crops/segment_{segment_id}/track_{track_id}"
+                    # os.makedirs(crop_folder, exist_ok=True)
 
-                    crop_path = (
-                        f"{crop_folder}/"
-                        f"segment_{segment_id}_track_{track_id}_frame_{frame}.jpg"
-                    )
+                    # crop_path = (
+                    #     f"{crop_folder}/"
+                    #     f"segment_{segment_id}_track_{track_id}_frame_{frame}.jpg"
+                    # )
 
-                    cv2.imwrite(crop_path, player_crop)
-                    pass
+                    # cv2.imwrite(crop_path, player_crop)
+                    
+                    # now if its a good crop, run the kit prediction on it, not really needed but in case needed later
+                    good_candidates.append(frame)
+                    
+                    # now call the prediction in the form of number_predictions = [
+                        # {"frame": 734, "number": "56", "confidence": 0.83}]
+                        
+                    player_kit_prediction, confidence = self.predict_number(player_crop)
+                    if player_kit_prediction is not None:
+                        number_predictions.append((frame, player_kit_prediction, confidence))
+
+            info['good_candidates'] = good_candidates
+            info['number_predictions'] = number_predictions
+
+        return dictionary
+                    
+                    
                                 
     
     # now use the uncertainty model on the candidate frames
@@ -173,3 +218,56 @@ class NumberAssigner:
             return False
 
         return True
+
+    # loads the PARSeq scene-text recogniser once and caches it on the instance
+    def load_recogniser(self):
+        if self.recogniser is None:
+            self.recogniser = torch.hub.load(
+                'baudm/parseq', 'parseq', pretrained=True, trust_repo=True
+            ).eval().to(self.device)
+        return self.recogniser
+    
+        
+        
+    
+
+    # runs PARSeq on a crop and returns the raw recognised (text, confidence) with NO filtering.
+    # confidence is the whole-string probability (the uncertainty). useful for debugging what the
+    # model actually read before the digit check throws it away
+    def read_text(self, crop):
+        parseq = self.load_recogniser()
+
+        rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+        tensor = self.number_transform(Image.fromarray(rgb)).unsqueeze(0).to(self.device)
+
+        with torch.no_grad():
+            logits = parseq(tensor)
+            pred = logits.softmax(-1)
+            labels, confidences = parseq.tokenizer.decode(pred)
+
+        conf = confidences[0]
+        score = float(conf.prod()) if len(conf) else 0.0
+
+        return labels[0], score
+
+    # crops the upper-back region of a full player crop, where the shirt number sits, so the
+    # recogniser sees mostly the digits instead of the whole body. this is a rough fixed-fraction
+    # heuristic - pose estimation would locate the number far more reliably
+    def get_number_crop(self, player_crop):
+        h, w = player_crop.shape[:2]
+        y1 = int(h * 0.20)
+        y2 = int(h * 0.50)
+        x1 = int(w * 0.15)
+        x2 = int(w * 0.85)
+        return player_crop[y1:y2, x1:x2]
+
+    # reads the shirt number from one player crop and returns (number_string, confidence), or
+    # (None, 0.0) if the read is not a valid jersey number (non-digit or > 99)
+    def predict_number(self, player_crop):
+        number_crop = self.get_number_crop(player_crop)
+        text, score = self.read_text(number_crop)
+
+        if not text.isdigit() or int(text) > 99:
+            return None, 0.0
+
+        return text, score
