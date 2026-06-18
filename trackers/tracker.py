@@ -62,6 +62,9 @@ class Tracker:
             return tracks
 
         tracker_config = tracker_config or self.tracker_config
+        previous_source_frame_num = None
+        track_id_offset = 0
+        max_track_id_seen = 0
 
         tracks = {
             # eg [{0:{bbox: [0,0,0,0]}}] etc for one frame so it does it for all the frames in the video
@@ -75,6 +78,17 @@ class Tracker:
             tracks["referees"].append({})
             tracks["ball"].append({})
 
+            source_frame_num = self.get_source_frame_number(frames, frame_num)
+            if self.should_reset_tracker(frame_num, source_frame_num, previous_source_frame_num):
+                if frame_num != 0:
+                    track_id_offset = max_track_id_seen
+                    print(
+                        "Resetting tracker before filtered frame "
+                        f"{frame_num} (source frame jumped from "
+                        f"{previous_source_frame_num} to {source_frame_num})"
+                    )
+                self.reset_ultralytics_tracker()
+
             results = self.model.track(
                 frame,
                 persist=True,
@@ -86,6 +100,7 @@ class Tracker:
             result = results[0]
 
             if result.boxes is None:
+                previous_source_frame_num = source_frame_num
                 continue
 
             bboxes = result.boxes.xyxy.cpu().tolist()
@@ -94,6 +109,9 @@ class Tracker:
 
             for bbox, cls_id, track_id in zip(bboxes, cls_ids, track_ids):
                 object_type = result.names[cls_id]
+                if track_id is not None:
+                    track_id = track_id + track_id_offset
+                    max_track_id_seen = max(max_track_id_seen, track_id)
 
                 if object_type == "goalkeeper":
                     object_type = "player"
@@ -107,12 +125,42 @@ class Tracker:
                 elif object_type == "ball":
                     tracks["ball"][frame_num][1] = {"bbox": bbox}
 
+            previous_source_frame_num = source_frame_num
+
         if stub_path is not None:
             with open(stub_path, 'wb') as f:
                 pickle.dump(tracks, f)
 
         # returns a list of dictionaries, with the positions of each bounding box at a certain frame
         return tracks
+
+    # when frames is a FrameSubset, keep track of the original video frame number
+    def get_source_frame_number(self, frames, frame_num):
+        if hasattr(frames, "indexes"):
+            return frames.indexes[frame_num]
+        return frame_num
+
+    # reset at the first frame and whenever a filtered video skips source frames
+    def should_reset_tracker(self, frame_num, source_frame_num, previous_source_frame_num):
+        if frame_num == 0:
+            return True
+
+        if source_frame_num is None or previous_source_frame_num is None:
+            return False
+
+        return source_frame_num != previous_source_frame_num + 1
+
+    # clear BoT-SORT/ByteTrack's live state without recreating the YOLO model
+    def reset_ultralytics_tracker(self):
+        predictor = getattr(self.model, "predictor", None)
+        if predictor is None or not hasattr(predictor, "trackers"):
+            return
+
+        for tracker in predictor.trackers:
+            tracker.reset()
+
+        if hasattr(predictor, "vid_path"):
+            predictor.vid_path = [None] * len(predictor.vid_path)
 
     def get_track_ids(self, result):
         if result.boxes.id is None:
@@ -204,6 +252,11 @@ class Tracker:
                 frame = self.draw_ellipse(
                     frame, player["bbox"], (colour), track_id)
 
+                # draw the shirt number above the player, if one was confidently read
+                number = player.get("number")
+                if number is not None:
+                    frame = self.draw_number(frame, player["bbox"], number)
+
             # draw referees,
             for track_id, ref in referee_dict.items():
                 frame = self.draw_ellipse(
@@ -225,3 +278,16 @@ class Tracker:
         colour = colour * factor
         colour = np.clip(colour, 0, 255)
         return tuple(colour.astype(int).tolist())
+
+    # draw the player's shirt number above their bounding box
+    def draw_number(self, frame, bbox, number):
+        x_center, _ = get_center_of_bbox(bbox)
+        y = int(bbox[1]) - 10
+        x_text = int(x_center) - 10
+
+        text = str(number)
+        # black outline then white fill so it's readable on any kit colour
+        cv2.putText(frame, text, (x_text, y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 4)
+        cv2.putText(frame, text, (x_text, y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+
+        return frame

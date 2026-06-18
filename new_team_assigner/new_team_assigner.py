@@ -153,12 +153,19 @@ class NewTeamAssigner:
     def get_player_crop(self, frame, bbox):
         x1, y1, x2, y2 = bbox
 
-        x1 = int(x1)
-        y1 = int(y1)
-        x2 = int(x2)
-        y2 = int(y2)
+        frame_h, frame_w = frame.shape[:2]
+
+        x1 = max(0, int(x1))
+        y1 = max(0, int(y1))
+        x2 = min(frame_w, int(x2))
+        y2 = min(frame_h, int(y2))
+
+        if x2 <= x1 or y2 <= y1:
+            return None
 
         player_crop = frame[y1:y2, x1:x2]
+        if player_crop.size == 0:
+            return None
 
         h, w = player_crop.shape[:2]
 
@@ -168,6 +175,8 @@ class NewTeamAssigner:
         torso_x2 = int(w * 0.80)
 
         torso_crop = player_crop[torso_y1:torso_y2, torso_x1:torso_x2]
+        if torso_crop.size == 0:
+            return None
 
         return torso_crop
         

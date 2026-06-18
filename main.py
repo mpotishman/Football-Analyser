@@ -16,6 +16,8 @@ SEGMENTS_STUB_PATH = "stubs/youtube_15_30_16_30_segments.pkl"
 CAMERA_FILTER_STUB_PATH = "stubs/youtube_15_30_16_30_main_camera_frame_indexes.pkl"
 TEAM_ASSIGNER_STUB_PATH = "stubs/youtube_15_30_16_30_team_assigner.pkl"
 OUTPUT_PATH = "output_videos/output_video.avi"
+PRINT_TRACKS = False
+PRINT_TRACKLETS = True
 
 # first get only the video frames
 # then keep only gameplay footage using the green pitch filter
@@ -47,7 +49,8 @@ def main():
     tracker = Tracker(MODEL_PATH)
     tracks = tracker.get_object_tracks(
         video_frames,
-        read_from_stub=True,
+        # Regenerate tracks so gap resets + stricter tracker settings take effect.
+        read_from_stub=False,
         stub_path=STUB_PATH,
     )
     
@@ -65,7 +68,8 @@ def main():
     segments = segmenter.get_main_camera_segments(
         video_frames,
         tracks,
-        read_from_stub=True,
+        # Recompute segments because regenerated tracks can change the player-count filter.
+        read_from_stub=False,
         stub_path=SEGMENTS_STUB_PATH
     )
     
@@ -73,6 +77,8 @@ def main():
 
 
     # Assign teams.
+    # Keep read_from_stub=False: the number pipeline (split tracklets + team filtering)
+    # needs freshly computed per-frame teams. Loading a stale team stub can break number drawing.
     team_assigner = NewTeamAssigner()
     tracks = team_assigner.assign_player_teams(
         video_frames,
@@ -83,7 +89,8 @@ def main():
     )
 
     # Print every frame's players with their assigned team and full track info.
-    team_assigner.summarise_tracks(tracks, segments)
+    if PRINT_TRACKS:
+        team_assigner.summarise_tracks(tracks, segments)
 
 
 
@@ -97,7 +104,8 @@ def main():
     tracklets, summary = number_assigner.build_tracklets(segments, video_frames, tracks)
 
     # Print each tracklet (segment, track_id) with its team, frame range and candidate frames.
-    number_assigner.summarise_tracklets(tracklets)
+    if PRINT_TRACKLETS:
+        number_assigner.summarise_tracklets(tracklets)
 
 
     # Keep only main camera frames for output.

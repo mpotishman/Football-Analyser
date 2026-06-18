@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/opt/anaconda3/bin/pip install *)",
+      "Bash(/opt/anaconda3/bin/python -c ' *)"
+    ]
+  }
+}
