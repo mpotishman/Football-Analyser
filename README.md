@@ -44,7 +44,7 @@ Shirt numbers are often only clear for a handful of frames. The analyser samples
 
 One confident reading is not enough. The same number must be found in at least two separate frames before it is accepted. The program then adds that number to the whole track, including earlier frames where the player's back was turned away or the number was too blurred to read.
 
-For example, if number **7** only becomes clear near the end of a track, the earlier frames from that same track can still be labelled **7**. This is how the backtracking works: a clear view later in the footage supplies the missing information for earlier views of the same player.
+In the below example, the first picture shows the correct number 6 above the players head despite it not being visible. This is because later in the footage (image 2), the number can be read and so all previous instances of that track ID now include that number recognised. 
 
 <p align="center">
   <img width="130" height="260" alt="Earlier view of the tracked player" src="https://github.com/user-attachments/assets/1ae50868-8b69-4987-a5c5-3efdf7651aa4" />
